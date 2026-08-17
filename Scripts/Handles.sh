@@ -256,3 +256,9 @@ if [ -f "$RUST_FILE" ]; then
 		echo "rust fix failed; continuing!"
 	fi
 fi
+
+# 修改 rrdtool.js 補齊 retain 屬性
+RRDJS=$(find feeds/luci/ -fullpath -name "rrdtool.js" | grep "view/statistics/plugins")
+if [ -n "$RRDJS" ]; then
+    sed -i "s/o.depends('enable', '1');/o.retain = true;\n\to.depends('enable', '1');/g" "$RRDJS"
+fi
