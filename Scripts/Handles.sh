@@ -257,8 +257,16 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# 修改 rrdtool.js 補齊 retain 屬性
-RRDJS=$(find feeds/luci/ -fullpath -name "rrdtool.js" | grep "view/statistics/plugins")
-if [ -n "$RRDJS" ]; then
-    sed -i "s/o.depends('enable', '1');/o.retain = true;\n\to.depends('enable', '1');/g" "$RRDJS"
+# 批次修補 luci-app-statistics 所有外掛 JS 控制檔，全數注入 o.retain = true
+PLUGINS_DIR=$(find feeds/luci/ -type d -path "*/view/statistics/plugins" 2>/dev/null)
+
+if [ -d "$PLUGINS_DIR" ]; then
+    echo "開始批次修補 Statistics 外掛..."
+    for js_file in "$PLUGINS_DIR"/*.js; do
+        [ -f "$js_file" ] || continue
+        # 為所有 option / depends 宣告下方補上 retain 屬性
+        sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g" "$js_file"
+        sed -i "s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$js_file"
+    done
+    echo "[DIY Check] 已成功修補 $PLUGINS_DIR 下的所有外掛 JS 檔案！"
 fi
