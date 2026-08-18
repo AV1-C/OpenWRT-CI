@@ -257,35 +257,53 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# ===== 修補 luci-app-statistics 批量保護腳本 =====
-# 1. 取得專案絕對根目錄
-if [ -n "${GITHUB_WORKSPACE:-}" ]; then
-	BASE_DIR="$GITHUB_WORKSPACE"
-else
-	BASE_DIR="$(pwd)"
+#修复luci-app-statistics
+# 1. 優先使用全檔名搜尋 rrdtool.js（避免 -path 匹配失敗）
+FOUND_FILE=""
+if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "$GITHUB_WORKSPACE" ]; then
+    FOUND_FILE=$(find "$GITHUB_WORKSPACE" -name "rrdtool.js" 2>/dev/null | grep "statistics" | head -n 1)
 fi
 
-# 2. 使用絕對路徑精準搜尋 plugins 資料夾
-STAT_PLUGINS_DIR=$(find "$BASE_DIR" -type d -path "*/view/statistics/plugins" 2>/dev/null | head -n 1)
+# 若絕對路徑沒找到，退回從當前目錄全盤搜尋
+if [ -z "$FOUND_FILE" ]; then
+    FOUND_FILE=$(find . -name "rrdtool.js" 2>/dev/null | grep "statistics" | head -n 1)
+fi
 
-if [ -n "$STAT_PLUGINS_DIR" ] && [ -d "$STAT_PLUGINS_DIR" ]; then
-	echo "[DIY Check] 成功找到外掛路徑: $STAT_PLUGINS_DIR"
+if [ -n "$FOUND_FILE" ] && [ -f "$FOUND_FILE" ]; then
+    echo "[DIY Check] 成功定位目標檔案: $FOUND_FILE"
+    
+    # 2. 自動反推外掛 plugins 資料夾絕對路徑
+    STAT_PLUGINS_DIR=$(dirname "$FOUND_FILE")
+    echo "[DIY Check] 外掛目錄絕對路徑: $STAT_PLUGINS_DIR"
 
-	# 3. 批次寫入 o.retain = true（避免重複寫入）
-	for js_file in "$STAT_PLUGINS_DIR"/*.js; do
-		if [ -f "$js_file" ]; then
-			if ! grep -q "o.retain = true" "$js_file"; then
-				sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g" "$js_file"
-				sed -i "s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$js_file"
-			fi
-		fi
-	done
+    # 3. 批次修補 plugins 目錄下的所有外掛 .js 檔
+    for js_file in "$STAT_PLUGINS_DIR"/*.js; do
+        if [ -f "$js_file" ]; then
+            if ! grep -q "o.retain = true" "$js_file"; then
+                sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g" "$js_file"
+                sed -i "s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$js_file"
+            fi
+        fi
+    done
 
-	echo "[DIY Check] statistics 所有外掛已被成功修補！"
-	echo "[DIY Check] 抽樣驗證 (rrdtool.js):"
-	grep -C 1 "o.retain = true" "$STAT_PLUGINS_DIR/rrdtool.js" | head -n 6
+    # 4. 順手修補上層 collectd.js 的 BaseDir 與 PIDFile 欄位
+    COLLECTD_JS="$(dirname "$STAT_PLUGINS_DIR")/collectd.js"
+    if [ -f "$COLLECTD_JS" ]; then
+        if ! grep -q "o.retain = true" "$COLLECTD_JS"; then
+            sed -i "s/'BaseDir', _('Base Directory')/'BaseDir', _('Base Directory')\n\to.retain = true;/g" "$COLLECTD_JS"
+            sed -i "s/'PIDFile', _('Used PID file')/'PIDFile', _('Used PID file')\n\to.retain = true;/g" "$COLLECTD_JS"
+        fi
+        echo "[DIY Check] collectd.js 通用設定修補完成！"
+    fi
+
+    echo "[DIY Check] statistics 所有外掛批次修補成功！"
+    echo "[DIY Check] 抽樣檢查 ($FOUND_FILE):"
+    grep -C 1 "o.retain = true" "$FOUND_FILE" | head -n 6
 else
-	echo "[DIY Check 錯誤] 找不到 view/statistics/plugins 目錄！請檢查 feeds 是否已完成下載。"
+    echo "[DIY Check 錯誤] 全盤搜尋皆未找到 rrdtool.js！"
+    echo "[DIY Check 診斷提示]："
+    echo "1. 請確認此腳本是放在 diy-part2.sh 中（必須在 feeds update/install 之後執行）。"
+    echo "2. 請確認 feeds 設定檔中包含 luci 倉庫。"
 fi
 echo "=========================================="
 echo " "
