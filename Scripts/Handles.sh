@@ -257,24 +257,24 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# ===== 修補 luci-app-statistics =====
+# ===== 修補 luci-app-statistics 避免設定消失 =====
 RRDJS=$(find -L . -path "*/view/statistics/plugins/rrdtool.js" 2>/dev/null | head -n 1)
 
 if [ -n "$RRDJS" ]; then
     STAT_DIR=$(dirname "$RRDJS")
 
-    # 1. 批次修補所有 plugins/*.js
+    # 1. 批次處理 plugins 目錄下的所有外掛
     for f in "$STAT_DIR"/*.js; do
-        if [ -f "$f" ] && ! grep -q "o.retain = true" "$f"; then
-            sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g; s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$f"
+        if [ -f "$f" ]; then
+            # 尋找所有 "o = ...option...;" 的宣告，並在分號後換行加上 o.retain = true;
+            sed -i "s|\(o = [^;]*option[^;]*\);|&\n\t\to.retain = true;|g" "$f"
         fi
     done
 
-    # 2. 安全修補 collectd.js（匹配 o.default 之後換行插入，絕不破壞 s.option 函數語法）
+    # 2. 處理上層的 collectd.js（使用完全一樣的安全邏輯）
     COLLECTD_JS="$(dirname "$STAT_DIR")/collectd.js"
-    if [ -f "$COLLECTD_JS" ] && ! grep -q "o.retain = true" "$COLLECTD_JS"; then
-        sed -i "/o.default = '\/var\/run\/collectd';/a \\\\t\\to.retain = true;" "$COLLECTD_JS"
-        sed -i "/o.default = '\/var\/run\/collectd.pid';/a \\\\t\\to.retain = true;" "$COLLECTD_JS"
+    if [ -f "$COLLECTD_JS" ]; then
+        sed -i "s|\(o = [^;]*option[^;]*\);|&\n\t\to.retain = true;|g" "$COLLECTD_JS"
     fi
 
     echo ">>> [SUCCESS] statistics 語法修補完成！"
