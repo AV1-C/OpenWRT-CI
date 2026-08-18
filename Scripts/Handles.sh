@@ -257,16 +257,35 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# 批次修補 luci-app-statistics 所有外掛 JS 控制檔，全數注入 o.retain = true
-PLUGINS_DIR=$(find feeds/luci/ -type d -path "*/view/statistics/plugins" 2>/dev/null)
-
-if [ -d "$PLUGINS_DIR" ]; then
-    echo "開始批次修補 Statistics 外掛..."
-    for js_file in "$PLUGINS_DIR"/*.js; do
-        [ -f "$js_file" ] || continue
-        # 為所有 option / depends 宣告下方補上 retain 屬性
-        sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g" "$js_file"
-        sed -i "s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$js_file"
-    done
-    echo "[DIY Check] 已成功修補 $PLUGINS_DIR 下的所有外掛 JS 檔案！"
+# ===== 修補 luci-app-statistics 批量保護腳本 =====
+# 1. 取得專案絕對根目錄
+if [ -n "${GITHUB_WORKSPACE:-}" ]; then
+	BASE_DIR="$GITHUB_WORKSPACE"
+else
+	BASE_DIR="$(pwd)"
 fi
+
+# 2. 使用絕對路徑精準搜尋 plugins 資料夾
+STAT_PLUGINS_DIR=$(find "$BASE_DIR" -type d -path "*/view/statistics/plugins" 2>/dev/null | head -n 1)
+
+if [ -n "$STAT_PLUGINS_DIR" ] && [ -d "$STAT_PLUGINS_DIR" ]; then
+	echo "[DIY Check] 成功找到外掛路徑: $STAT_PLUGINS_DIR"
+
+	# 3. 批次寫入 o.retain = true（避免重複寫入）
+	for js_file in "$STAT_PLUGINS_DIR"/*.js; do
+		if [ -f "$js_file" ]; then
+			if ! grep -q "o.retain = true" "$js_file"; then
+				sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g" "$js_file"
+				sed -i "s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$js_file"
+			fi
+		fi
+	done
+
+	echo "[DIY Check] statistics 所有外掛已被成功修補！"
+	echo "[DIY Check] 抽樣驗證 (rrdtool.js):"
+	grep -C 1 "o.retain = true" "$STAT_PLUGINS_DIR/rrdtool.js" | head -n 6
+else
+	echo "[DIY Check 錯誤] 找不到 view/statistics/plugins 目錄！請檢查 feeds 是否已完成下載。"
+fi
+echo "=========================================="
+echo " "
