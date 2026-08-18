@@ -257,25 +257,25 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# ===== 精簡版：修補 luci-app-statistics (防止網頁 Save & Apply 誤刪 UCI 參數) =====
+# ===== 修補 luci-app-statistics =====
 RRDJS=$(find -L . -path "*/view/statistics/plugins/rrdtool.js" 2>/dev/null | head -n 1)
 
 if [ -n "$RRDJS" ]; then
-    echo " "
     STAT_DIR=$(dirname "$RRDJS")
 
-    # 1. 批次寫入 o.retain = true 至所有 plugins/*.js
+    # 1. 批次修補所有 plugins/*.js
     for f in "$STAT_DIR"/*.js; do
         if [ -f "$f" ] && ! grep -q "o.retain = true" "$f"; then
             sed -i "s/\(o\.depends.*\);/\1;\n\to.retain = true;/g; s/\(o = s\.option.*\);/\1;\n\to.retain = true;/g" "$f"
         fi
     done
 
-    # 2. 修補 collectd.js 通用設定
+    # 2. 安全修補 collectd.js（匹配 o.default 之後換行插入，絕不破壞 s.option 函數語法）
     COLLECTD_JS="$(dirname "$STAT_DIR")/collectd.js"
     if [ -f "$COLLECTD_JS" ] && ! grep -q "o.retain = true" "$COLLECTD_JS"; then
-        sed -i "s/'BaseDir', _('Base Directory')/'BaseDir', _('Base Directory')\n\to.retain = true;/g; s/'PIDFile', _('Used PID file')/'PIDFile', _('Used PID file')\n\to.retain = true;/g" "$COLLECTD_JS"
+        sed -i "/o.default = '\/var\/run\/collectd';/a \\\\t\\to.retain = true;" "$COLLECTD_JS"
+        sed -i "/o.default = '\/var\/run\/collectd.pid';/a \\\\t\\to.retain = true;" "$COLLECTD_JS"
     fi
 
-    echo ">>> [SUCCESS] luci-app-statistics 所有外掛與通用設定修補完成！"
+    echo ">>> [SUCCESS] statistics 語法修補完成！"
 fi
