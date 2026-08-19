@@ -257,25 +257,42 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-# ===== 修補 luci-app-statistics 避免設定消失 =====
-RRDJS=$(find -L . -path "*/view/statistics/plugins/rrdtool.js" 2>/dev/null | head -n 1)
+# 修復 luci-app-statistics：儲存局部設定時不刪除未修改的設定
+STAT_APP="$PKG_PATH/../feeds/luci/applications/luci-app-statistics"
+STAT_VIEW="$STAT_APP/htdocs/luci-static/resources/view/statistics"
+COLLECTD_JS="$STAT_VIEW/collectd.js"
+STAT_CONFIG="$STAT_APP/root/etc/config/luci_statistics"
 
-if [ -n "$RRDJS" ]; then
-    STAT_DIR=$(dirname "$RRDJS")
+if [ -d "$STAT_VIEW" ] && [ -f "$COLLECTD_JS" ] && [ -f "$STAT_CONFIG" ]; then
+	# 對所有 statistics 設定頁：
+	# 1. 預設值不視為可刪除的空值
+	# 2. depends() 暫時不成立時保留原 UCI 設定
+	while IFS= read -r JS_FILE; do
+		if ! grep -Fq 'statistics-save-fix' "$JS_FILE"; then
+			sed -i \
+				-e "/^[[:space:]]*o\.default[[:space:]]*=/a\\
+		o.rmempty = false; // statistics-save-fix" \
+				-e "/^[[:space:]]*o\.depends(/a\\
+		o.retain = true; // statistics-save-fix" \
+				"$JS_FILE"
+		fi
+	done < <(find "$STAT_VIEW" -type f -name '*.js')
 
-    # 1. 批次處理 plugins 目錄下的所有外掛
-    for f in "$STAT_DIR"/*.js; do
-        if [ -f "$f" ]; then
-            # 尋找所有 "o = ...option...;" 的宣告，並在分號後換行加上 o.retain = true;
-            sed -i "s|\(o = [^;]*option[^;]*\);|&\n\t\to.retain = true;|g" "$f"
-        fi
-    done
+	# collectd.js 的 plugin enable 是變數 enabled，不是 o
+	if ! grep -Fq 'statistics-plugin-enable-fix' "$COLLECTD_JS"; then
+		sed -i "/enabled.modalonly = false;/a\\
+			enabled.rmempty = false; // statistics-plugin-enable-fix\\
+			enabled.retain = true;" "$COLLECTD_JS"
+	fi
 
-    # 2. 處理上層的 collectd.js（使用完全一樣的安全邏輯）
-    COLLECTD_JS="$(dirname "$STAT_DIR")/collectd.js"
-    if [ -f "$COLLECTD_JS" ]; then
-        sed -i "s|\(o = [^;]*option[^;]*\);|&\n\t\to.retain = true;|g" "$COLLECTD_JS"
-    fi
+	# DynamicList 必須採用 UCI list，避免 RRATimespans 每次儲存都被刪除後重建
+	if grep -Fq "option RRATimespans '2hour 1day 1week 1month 1year'" "$STAT_CONFIG"; then
+		sed -i "s/^[[:space:]]*option RRATimespans '2hour 1day 1week 1month 1year'/	list RRATimespans '2hour'\\
+	list RRATimespans '1day'\\
+	list RRATimespans '1week'\\
+	list RRATimespans '1month'\\
+	list RRATimespans '1year'/" "$STAT_CONFIG"
+	fi
 
-    echo ">>> [SUCCESS] statistics 語法修補完成！"
+	echo "luci-app-statistics save fix applied"
 fi
